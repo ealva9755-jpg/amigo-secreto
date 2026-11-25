@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Amigo Secreto 🎁</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --rojo: #c0392b;
+    --verde: #1e7e4a;
+    --fondo: #fdf6ec;
+    --texto: #2b2b2b;
+    --gris: #8a8a8a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--fondo); color: var(--texto);
+    min-height: 100vh; display: flex; justify-content: center;
+  }
+  .app { width: 100%; max-width: 480px; padding: 24px 16px 48px; }
+  h1 { text-align: center; color: var(--rojo); margin: 8px 0 4px; font-size: 1.8rem; }
+  .sub { text-align: center; color: var(--gris); margin: 0 0 20px; font-size: .95rem; }
+  .aviso {
+    background: #fff3cd; border: 1px solid #ffe08a; border-radius: 10px;
+    padding: 10px 12px; font-size: .9rem; margin-bottom: 16px;
+  }
+  .lista { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .nombre {
+    background: #fff; border: 2px solid #eee; border-radius: 12px;
+    padding: 14px 10px; font-size: .95rem; cursor: pointer; text-align: left;
+    display: flex; justify-content: space-between; align-items: center; gap: 6px;
+    color: var(--texto);
+  }
+  .nombre:hover { border-color: var(--verde); }
+  .nombre .lock { font-size: .85rem; }
+  .card {
+    background: #fff; border-radius: 16px; padding: 22px 18px;
+    box-shadow: 0 4px 18px rgba(0,0,0,.07);
+  }
+  .card h2 { margin: 0 0 6px; font-size: 1.3rem; }
+  .card p { margin: 6px 0 14px; color: #555; font-size: .95rem; }
+  label { display: block; font-size: .85rem; color: var(--gris); margin: 10px 0 4px; }
+  input {
+    width: 100%; font-size: 1.6rem; letter-spacing: .6rem; text-align: center;
+    padding: 10px; border: 2px solid #ddd; border-radius: 10px;
+  }
+  input:focus { outline: none; border-color: var(--verde); }
+  .btn {
+    width: 100%; margin-top: 16px; padding: 14px; border: 0; border-radius: 12px;
+    font-size: 1rem; font-weight: 600; cursor: pointer;
+    background: var(--verde); color: #fff;
+  }
+  .btn:disabled { opacity: .6; cursor: default; }
+  .btn.sec { background: transparent; color: var(--gris); margin-top: 8px; }
+  .error { color: var(--rojo); font-size: .9rem; margin-top: 10px; min-height: 1.2em; }
+  .resultado { text-align: center; }
+  .resultado .regalo {
+    font-size: 2rem; font-weight: 800; color: var(--rojo); margin: 14px 0;
+  }
+  .oculto { display: none; }
+  .cargando { text-align: center; color: var(--gris); padding: 30px 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>🎄 Amigo Secreto 🎁</h1>
+  <p class="sub">Toca <b>tu</b> nombre para ver a quién le regalas</p>
+
+  <!-- PANTALLA 1: LISTA -->
+  <div id="pantallaLista">
+    <div class="aviso">
+      ⚠️ Toca <b>solo tu nombre</b>. La primera vez creas un PIN de 4 números; con ese PIN puedes volver a ver tu resultado cuando quieras.<br>
+      🔒 = ya entró. Si tu nombre aparece con 🔒 y no fuiste tú, avísale al organizador.
+    </div>
+    <div id="lista" class="lista"><div class="cargando">Cargando…</div></div>
+  </div>
+
+  <!-- PANTALLA 2: PIN -->
+  <div id="pantallaPin" class="card oculto">
+    <h2 id="pinTitulo"></h2>
+    <p id="pinTexto"></p>
+    <label for="pin1">PIN (4 números)</label>
+    <input id="pin1" type="password" inputmode="numeric" maxlength="4" autocomplete="off">
+    <div id="bloqueConfirmar">
+      <label for="pin2">Repite el PIN</label>
+      <input id="pin2" type="password" inputmode="numeric" maxlength="4" autocomplete="off">
+    </div>
+    <div id="error" class="error"></div>
+    <button id="btnVer" class="btn">Ver mi amigo secreto</button>
+    <button id="btnVolver" class="btn sec">← No soy yo, volver</button>
+  </div>
+
+  <!-- PANTALLA 3: RESULTADO -->
+  <div id="pantallaResultado" class="card resultado oculto">
+    <p>Hola <b id="resNombre"></b>, te toca regalarle a:</p>
+    <div id="resRegalo" class="regalo"></div>
+    <p>🤫 No le digas a nadie. Revisa sus 3 opciones en el Excel de regalos.</p>
+    <p id="resNuevo" style="font-size:.85rem;color:#8a8a8a">Tu PIN quedó guardado. Si quieres volver a verlo, entra con el mismo PIN.</p>
+    <button id="btnSalir" class="btn">Listo, salir</button>
+  </div>
+</div>
+
+<script>
+  // ====== CONFIGURA ESTO (Supabase > Project Settings > API) ======
+  const SUPABASE_URL = "https://TU-PROYECTO.supabase.co";
+  const SUPABASE_KEY = "TU_ANON_O_PUBLISHABLE_KEY";
+  // ================================================================
+
+  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  const $ = (id) => document.getElementById(id);
+  let seleccionado = null; // { nombre, reclamado }
+
+  function mostrar(pantalla) {
+    ["pantallaLista", "pantallaPin", "pantallaResultado"].forEach(p =>
+      $(p).classList.toggle("oculto", p !== pantalla));
+  }
+
+  async function cargarLista() {
+    mostrar("pantallaLista");
+    $("lista").innerHTML = '<div class="cargando">Cargando…</div>';
+    const { data, error } = await sb.rpc("listar");
+    if (error) {
+      $("lista").innerHTML = '<div class="cargando">No se pudo cargar. Recarga la página.</div>';
+      console.error(error);
+      return;
+    }
+    $("lista").innerHTML = "";
+    data.forEach(p => {
+      const b = document.createElement("button");
+      b.className = "nombre";
+      b.innerHTML = `<span></span>${p.reclamado ? '<span class="lock">🔒</span>' : ""}`;
+      b.firstChild.textContent = p.nombre;
+      b.onclick = () => abrirPin(p);
+      $("lista").appendChild(b);
+    });
+  }
+
+  function abrirPin(p) {
+    seleccionado = p;
+    $("pin1").value = ""; $("pin2").value = ""; $("error").textContent = "";
+    if (p.reclamado) {
+      $("pinTitulo").textContent = `🔒 ${p.nombre}`;
+      $("pinTexto").textContent = "Ingresa el PIN que creaste la primera vez.";
+      $("bloqueConfirmar").classList.add("oculto");
+    } else {
+      $("pinTitulo").textContent = `¿Eres ${p.nombre}?`;
+      $("pinTexto").textContent = "Crea un PIN de 4 números. Desde ahora tu nombre quedará protegido con él. Si no eres tú, vuelve atrás.";
+      $("bloqueConfirmar").classList.remove("oculto");
+    }
+    mostrar("pantallaPin");
+    $("pin1").focus();
+  }
+
+  async function verResultado() {
+    const pin1 = $("pin1").value.trim();
+    const pin2 = $("pin2").value.trim();
+    $("error").textContent = "";
+
+    if (!/^\d{4}$/.test(pin1)) { $("error").textContent = "El PIN debe tener 4 números."; return; }
+    if (!seleccionado.reclamado && pin1 !== pin2) { $("error").textContent = "Los PIN no coinciden."; return; }
+
+    $("btnVer").disabled = true;
+    const { data, error } = await sb.rpc("ver_resultado", { p_nombre: seleccionado.nombre, p_pin: pin1 });
+    $("btnVer").disabled = false;
+
+    if (error) { $("error").textContent = "Error de conexión, intenta de nuevo."; console.error(error); return; }
+    if (!data.ok) { $("error").textContent = data.error; return; }
+
+    $("resNombre").textContent = seleccionado.nombre;
+    $("resRegalo").textContent = data.regalo;
+    $("resNuevo").classList.toggle("oculto", !data.nuevo);
+    mostrar("pantallaResultado");
+  }
+
+  $("btnVer").onclick = verResultado;
+  $("pin1").addEventListener("keydown", e => { if (e.key === "Enter") verResultado(); });
+  $("pin2").addEventListener("keydown", e => { if (e.key === "Enter") verResultado(); });
+  $("btnVolver").onclick = cargarLista;
+  $("btnSalir").onclick = () => {
+    $("resRegalo").textContent = "";
+    cargarLista();
+  };
+
+  cargarLista();
+</script>
+</body>
+</html>
